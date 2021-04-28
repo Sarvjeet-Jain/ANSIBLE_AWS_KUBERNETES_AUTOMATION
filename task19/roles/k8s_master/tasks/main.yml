@@ -1,0 +1,70 @@
+---
+# tasks file for k8s_master\
+
+- name: ADDING YUM REPO FOR KUBEADM
+  yum_repository:
+    name: kube
+    description: Kubernetes repo
+    baseurl: https://packages.cloud.google.com/yum/repos/kubernetes-el7-$basearch
+    enabled: 1
+    gpgcheck: 1
+    gpgkey: https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+
+- name: INSTALL DOCKER, KUBEADM, IPROUTE-TC
+  package:
+    name:
+      - docker
+      - kubeadm
+      - iproute-tc
+    state: present
+
+- name: SERVICE STARTING
+  service:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+  loop: "{{ service_names }}"
+
+- name: PULLING IMAGES OF DOCKER FOR MASTER NODE
+  command: kubeadm config images pull
+
+- name: UPDATING DOCKER CGROUP
+  copy:
+    dest: /etc/docker/daemon.json
+    src: daemon.json
+
+- name: RESTARTING DOCKER ON MN
+  service:
+    name: docker
+    state: restarted
+
+- name: UPDATING K8S CONF FILE ON MN
+  copy:
+    dest: /etc/sysctl.d/k8s.conf
+    content: |
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.bridge.bridge-nf-call-iptables = 1
+
+- name: RESTARTING SYSCTL ON MN
+  command: sysctl --system
+
+
+- name: INITIALIZING K8S
+  command: kubeadm init --pod-network-cidr=10.244.0.0/16 --ignore-preflight-errors=NumCPU --ignore-preflight-errors=Mem
+
+- name: KUBECTL SETUP ON MN
+  shell:
+    cmd: |
+      mkdir -p $HOME/.kube
+      sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+      sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+- name: DEPLOYING FLANNEL ON MN
+  command: kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+
+- name: TOKEN FOR SLAVE JOIN
+  command: kubeadm token create  --print-join-command
+  register: token
+
+- name: CLEANING RAM
+  shell: echo 3 > /proc/sys/vm/drop_caches

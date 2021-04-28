@@ -1,0 +1,52 @@
+---
+# tasks file for k8s_slave
+
+- name: ADDING YUM REPO FOR KUBEADM ON SN
+  yum_repository:
+    name: kube
+    description: Kubernetes repo
+    baseurl: https://packages.cloud.google.com/yum/repos/kubernetes-el7-$basearch
+    enabled: 1
+    gpgcheck: 1
+    gpgkey: https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+
+- name: INSTALLING DOCKER, KUBELET ON SN
+  package:
+    name:
+      - docker
+      - kubeadm
+      - iproute-tc
+    state: present
+
+- name: SERVICES FOR SN
+  service:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+  loop: "{{ service_names }}"
+
+- name: UPDATING DOCKER CGROUP ON SN
+  copy:
+    dest: /etc/docker/daemon.json
+    src: daemon.json
+
+- name: RESTARTING DOCKER ON SN
+  service:
+    name: docker
+    state: restarted
+
+- name: UPDATING K8S CONF FILE ON SN
+  copy:
+    dest: /etc/sysctl.d/k8s.conf
+    content: |
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.bridge.bridge-nf-call-iptables = 1
+
+- name: RESTARTING SYSCTL ON SN
+  command: sysctl --system
+
+- name: JOINING MN
+  command: "{{ hostvars[groups['ec2_master'][0]]['token']['stdout'] }}"
+
+- name: CLEANING RAM
+  shell: echo 3 > /proc/sys/vm/drop_caches
